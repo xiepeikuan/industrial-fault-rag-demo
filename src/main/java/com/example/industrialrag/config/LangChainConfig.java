@@ -4,14 +4,11 @@ import com.example.industrialrag.service.IndustrialAssistant;
 import com.example.industrialrag.service.IndustrialManualData;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.memory.chat.ChatMemory;
+import dev.langchain4j.memory.ChatMemory;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
-import dev.langchain4j.rag.content.ContentRetriever;
-import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
-import dev.langchain4j.rag.easy.EasyRag;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
@@ -22,6 +19,9 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import static dev.langchain4j.data.segment.TextSegment.from;
+import static dev.langchain4j.internal.Utils.isNullOrEmpty;
 
 /**
  * 作者：xiepk
@@ -67,63 +67,44 @@ public class LangChainConfig {
         return new InMemoryEmbeddingStore<>();
     }
 
-    @Bean
-    public ContentRetriever contentRetriever(EmbeddingStore<TextSegment> store, OllamaEmbeddingModel embeddingModel) {
-        return EmbeddingStoreContentRetriever.builder()
-                .embeddingStore(store)
-                .embeddingModel(embeddingModel)
-                .maxResults(5)
-                .build();
-    }
 
     @Bean
     public ChatMemory chatMemory() {
-        return MessageWindowChatMemory.withMaxMessages(10);
+        return MessageWindowChatMemory.builder()
+                .maxMessages(10)
+                .build();
     }
 
     @Bean
     public IndustrialAssistant industrialAssistant(ChatLanguageModel chatModel,
-                                                   ContentRetriever retriever,
+                                                   EmbeddingStore<TextSegment> embeddingStore,
+                                                   OllamaEmbeddingModel embeddingModel,
                                                    ChatMemory memory) {
         return AiServices.builder(IndustrialAssistant.class)
                 .chatLanguageModel(chatModel)
-                .contentRetriever(retriever)
                 .chatMemory(memory)
-                .systemMessage("你是专业的工业设备故障诊断助手。\n" +
-                        "请基于检索到的手册内容回答问题，优先使用中文，\n" +
-                        "并在回答中显式标注引用来源，例如：‘基于手册第X条’。\n" +
-                        "若无依据，请明确说明。")
                 .build();
     }
 
-    @Bean
-    public EasyRag easyRag(ChatLanguageModel chatModel,
-                           OllamaEmbeddingModel embeddingModel,
-                           EmbeddingStore<TextSegment> store) {
-        // 集成 Easy RAG，当前主要用于演示与后续扩展
-        return EasyRag.builder()
-                .chatLanguageModel(chatModel)
-                .embeddingModel(embeddingModel)
-                .embeddingStore(store)
-                .build();
-    }
+
 
     /**
-     * 将模拟“工业设备维护手册”文本切分并写入向量库。
-     * 为了便于回答中引用编号，这里在文本前加入“手册第X条：”。
+     * 将模拟"工业设备维护手册"文本切分并写入向量库。
+     * 为了便于回答中引用编号，这里在文本前加入"手册第 X 条："。
      */
     @PostConstruct
     public void ingestManuals() {
         EmbeddingStore<TextSegment> store = embeddingStore();
         OllamaEmbeddingModel embModel = embeddingModel();
-
+    
         List<String> sections = IndustrialManualData.manualSections();
         int idx = 1;
         for (String section : sections) {
             String titled = "手册第" + idx + "条：" + section;
             List<TextSegment> segments = chunkAsSegments(titled, 300);
             for (TextSegment seg : segments) {
-                Embedding embedding = embModel.embed(seg.text());
+                dev.langchain4j.model.output.Response<Embedding> response = embModel.embed(seg.text());
+                Embedding embedding = response.content();
                 store.add(embedding, seg);
             }
             idx++;
@@ -140,14 +121,14 @@ public class LangChainConfig {
         for (String s : sentences) {
             if (sb.length() + s.length() > chunkSize) {
                 if (sb.length() > 0) {
-                    segments.add(TextSegment.from(sb.toString().trim()));
+                    segments.add(from(sb.toString().trim()));
                     sb.setLength(0);
                 }
             }
             sb.append(s);
         }
         if (sb.length() > 0) {
-            segments.add(TextSegment.from(sb.toString().trim()));
+            segments.add(from(sb.toString().trim()));
         }
         return segments;
     }
