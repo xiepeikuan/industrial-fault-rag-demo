@@ -1,0 +1,12 @@
+server:
+  port: 8080
+
+ollama:
+  base-url: http://localhost:11434
+  chat-model: llama3.1:8b
+  embedding-model: all-minilm
+
+# 说明：
+# - 若需持久化向量，可改用 PGVector（并添加对应依赖与配置）。
+# - 本示例优先使用内存 InMemoryEmbeddingStore，便于快速演示与运行。
+
